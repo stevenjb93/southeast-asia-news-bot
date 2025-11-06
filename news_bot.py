@@ -3,11 +3,13 @@ import requests
 import feedparser
 import time
 from datetime import datetime
-import urllib.parse
+from googletrans import Translator  # pip install googletrans==4.0.0-rc1
 
+# 读取环境变量
 WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+# 新闻RSS源（东南亚跨境电商方向）
 RSS_FEEDS = [
     "https://news.google.com/rss/search?q=southeast+asia+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
     "https://news.google.com/rss/search?q=philippines+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
@@ -16,25 +18,23 @@ RSS_FEEDS = [
     "https://news.google.com/rss/search?q=vietnam+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"
 ]
 
+translator = Translator()
+
 def get_latest_news():
+    """抓取新闻标题和链接"""
     news_items = []
     for url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:2]:  # 每个源取前2条
-                summary_text = entry.get("summary", "")  # RSS 描述字段
-                news_items.append({
-                    "title": entry.title,
-                    "link": entry.link,
-                    "rss_summary": summary_text
-                })
+                news_items.append({"title": entry.title, "link": entry.link})
         except Exception as e:
             print("RSS抓取失败:", e)
     return news_items
 
 def summarize_with_gpt(news_item, retries=3, delay=2):
-    """调用 OpenAI GPT 生成中文摘要"""
-    prompt_text = f"新闻标题：{news_item['title']}\n新闻摘要：{news_item['rss_summary']}\n请用中文写一句15字内摘要，突出经济、政策或天气对电商影响。"
+    """调用 GPT 生成中文摘要，如果失败则 fallback 翻译标题"""
+    prompt_text = f"新闻标题：{news_item['title']}\n请用中文写一句15字内摘要，突出经济、政策或天气对电商影响。"
     for attempt in range(retries):
         try:
             response = requests.post(
@@ -59,22 +59,36 @@ def summarize_with_gpt(news_item, retries=3, delay=2):
             if summary:
                 return summary
         except Exception as e:
-            print(f"摘要生成失败: {e}, 重试 {attempt+1}/{retries}")
+            print(f"GPT摘要失败: {e}, 重试 {attempt+1}/{retries}")
             time.sleep(delay)
-    # fallback：简单翻译标题
-    return news_item['title']
+    # fallback 翻译标题
+    try:
+        translated = translator.translate(news_item['title'], src='en', dest='zh-cn')
+        return translated.text
+    except Exception as e:
+        print("翻译失败:", e)
+        return news_item['title']
 
 def shorten_link(url):
-    parsed = urllib.parse.urlparse(url)
-    return f"{parsed.netloc}{parsed.path}"
+    """使用 TinyURL API 生成短链接"""
+    try:
+        resp = requests.get(f"http://tinyurl.com/api-create.php?url={url}", timeout=5)
+        if resp.status_code == 200:
+            return resp.text
+    except Exception as e:
+        print("短链接生成失败:", e)
+    # fallback 返回原链接
+    return url
 
 def send_to_feishu(news_list):
+    """发送新闻到飞书"""
     if not news_list:
         text = "今日暂无相关新闻"
     else:
         lines = []
         for news in news_list:
-            lines.append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {shorten_link(news['link'])}")
+            short_url = shorten_link(news['link'])
+            lines.append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {short_url}")
         text = "\n\n".join(lines)
 
     payload = {
