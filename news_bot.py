@@ -11,24 +11,28 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # RSS源
 RSS_FEEDS = [
-    "https://news.google.com/rss/search?q=southeast+asia+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
-    "https://news.google.com/rss/search?q=philippines+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
-    "https://news.google.com/rss/search?q=thailand+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
-    "https://news.google.com/rss/search?q=malaysia+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
-    "https://news.google.com/rss/search?q=vietnam+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"
+    ("东南亚", "https://news.google.com/rss/search?q=southeast+asia+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"),
+    ("菲律宾", "https://news.google.com/rss/search?q=philippines+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"),
+    ("泰国", "https://news.google.com/rss/search?q=thailand+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"),
+    ("马来西亚", "https://news.google.com/rss/search?q=malaysia+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"),
+    ("越南", "https://news.google.com/rss/search?q=vietnam+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en")
 ]
 
 translator = Translator()
 
 def get_latest_news():
     news_items = []
-    for url in RSS_FEEDS:
+    for region_name, url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:2]:  # 每源取前2条
-                news_items.append({"title": entry.title, "link": entry.link})
+                news_items.append({
+                    "title": entry.title,
+                    "link": entry.link,
+                    "region": region_name
+                })
         except Exception as e:
-            print("RSS抓取失败:", e)
+            print(f"RSS抓取失败 ({region_name}):", e)
     return news_items
 
 def summarize_with_gpt(news_title, retries=3, delay=2):
@@ -78,10 +82,18 @@ def send_to_feishu(news_list):
     if not news_list:
         text = "今日暂无相关新闻"
     else:
-        lines = []
+        # 按地区分类
+        region_dict = {}
         for news in news_list:
+            region = news['region']
+            if region not in region_dict:
+                region_dict[region] = []
             short_link = shorten_link(news['link'])
-            lines.append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {short_link}")
+            region_dict[region].append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {short_link}")
+        
+        lines = []
+        for region, items in region_dict.items():
+            lines.append(f"📍 {region}：\n" + "\n\n".join(items))
         text = "\n\n".join(lines)
 
     payload = {
