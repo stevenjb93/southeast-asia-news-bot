@@ -1,21 +1,23 @@
-name: Run News Bot
+name: run-news-bot
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # UTC 2点每天运行一次
+    # 每天 2:00 UTC 运行
+    - cron: '0 2 * * *'
   workflow_dispatch:
 
 jobs:
-  run-news-bot:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.13'
+          python-version: '3.12'  # 改成 3.12，解决 cgi 模块问题
 
       - name: Install dependencies
         run: |
