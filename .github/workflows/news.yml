@@ -27,4 +27,4 @@ jobs:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: python news_bot_py.py
+        run: python news_bot.py
