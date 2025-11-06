@@ -57,7 +57,7 @@ def send_to_feishu(news_list):
     else:
         lines = []
         for news in news_list:
-            lines.append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {news['link']}")
+            lines.append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 [点击查看原文]({news['link']})")
         text = "\n\n".join(lines)
 
     payload = {
