@@ -3,10 +3,19 @@ import requests
 import feedparser
 import time
 from datetime import datetime
+from dotenv import load_dotenv
+
+# 加载本地 .env 文件（可选，用于本地测试）
+load_dotenv()
 
 # 读取环境变量
 WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if not WEBHOOK_URL:
+    raise ValueError("未配置 FEISHU_WEBHOOK，请在环境变量或 .env 中设置")
+if not OPENAI_API_KEY:
+    raise ValueError("未配置 OPENAI_API_KEY，请在环境变量或 .env 中设置")
 
 # 新闻RSS源（东南亚跨境电商方向）
 RSS_FEEDS = [
@@ -17,16 +26,16 @@ RSS_FEEDS = [
     "https://news.google.com/rss/search?q=vietnam+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"
 ]
 
-def get_latest_news():
+def get_latest_news(max_per_feed=2):
     """抓取新闻标题和链接"""
     news_items = []
     for url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:2]:  # 每个源取前2条
+            for entry in feed.entries[:max_per_feed]:
                 news_items.append({"title": entry.title, "link": entry.link})
         except Exception as e:
-            print("RSS抓取失败:", e)
+            print(f"RSS抓取失败 ({url}):", e)
     return news_items
 
 def summarize_with_gpt(news_title, retries=3, delay=2):
@@ -65,9 +74,7 @@ def send_to_feishu(news_list):
     if not news_list:
         text = "今日暂无相关新闻"
     else:
-        lines = []
-        for news in news_list:
-            lines.append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {news['link']}")
+        lines = [f"📰 {news['title']}\n💬 {news.get('summary','（摘要生成失败）')}\n🔗 {news['link']}" for news in news_list]
         text = "\n\n".join(lines)
 
     payload = {
@@ -81,8 +88,5 @@ def send_to_feishu(news_list):
     except Exception as e:
         print("飞书发送失败:", e)
 
-if __name__ == "__main__":
-    news_data = get_latest_news()
-    for item in news_data:
-        item["summary"] = summarize_with_gpt(item["title"])
-    send_to_feishu(news_data)
+def main():
+    news_data_
