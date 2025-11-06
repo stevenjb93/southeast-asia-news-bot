@@ -6,9 +6,9 @@ from datetime import datetime
 from googletrans import Translator  # pip install googletrans==4.0.0-rc1
 
 # 环境变量
-FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
+WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+WEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
 # RSS源
 RSS_FEEDS = {
@@ -19,44 +19,30 @@ RSS_FEEDS = {
     "Singapore": "https://news.google.com/rss/search?q=singapore+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"
 }
 
-# 国家对应 OpenWeatherMap 的 ISO 3166-1 alpha-2 代码
-COUNTRY_CODES = {
-    "Thailand": "TH",
-    "Malaysia": "MY",
-    "Vietnam": "VN",
-    "Philippines": "PH",
-    "Singapore": "SG"
+COUNTRY_CITY_CODE = {
+    "Thailand": "Bangkok,TH",
+    "Malaysia": "Kuala Lumpur,MY",
+    "Vietnam": "Hanoi,VN",
+    "Philippines": "Manila,PH",
+    "Singapore": "Singapore,SG"
 }
 
 translator = Translator()
 
-def get_weather(city_name, country_code):
-    try:
-        url = f"http://api.openweathermap.org/data/2.5/weather?q={city_name},{country_code}&appid={OPENWEATHER_API_KEY}&units=metric&lang=zh_cn"
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        description = data['weather'][0]['description']
-        temp = data['main']['temp']
-        return f"{description}, {temp}℃"
-    except Exception as e:
-        print(f"天气获取失败 ({city_name}):", e)
-        return "天气信息不可用"
-
 def get_latest_news():
-    news_data = {}
+    news_items = {}
     for country, url in RSS_FEEDS.items():
-        news_items = []
+        news_items[country] = []
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:2]:
-                news_items.append({"title": entry.title, "link": entry.link})
+            for entry in feed.entries[:2]:  # 每源取前2条
+                news_items[country].append({"title": entry.title, "link": entry.link})
         except Exception as e:
             print(f"{country} RSS抓取失败:", e)
-        news_data[country] = news_items
-    return news_data
+    return news_items
 
 def summarize_with_gpt(news_title, retries=3, delay=2):
+    """调用 GPT 生成摘要"""
     for attempt in range(retries):
         try:
             response = requests.post(
@@ -84,36 +70,57 @@ def summarize_with_gpt(news_title, retries=3, delay=2):
             print(f"摘要生成失败: {e}, 重试 {attempt+1}/{retries}")
         time.sleep(delay)
 
+    # GPT失败时用Google翻译标题
     try:
         translated = translator.translate(news_title, src='en', dest='zh-cn')
         return translated.text
     except Exception as e:
         print("翻译失败:", e)
-        return news_title
+        return news_title  # 最后兜底用原文
 
 def shorten_link(url):
+    """简单缩短Google RSS链接"""
     if "articles/" in url:
         return "https://news.google.com/" + url.split("articles/")[1].split("?")[0]
     return url
 
+def get_weather(country):
+    city_code = COUNTRY_CITY_CODE.get(country)
+    if not city_code or not WEATHER_API_KEY:
+        return "天气信息不可用"
+
+    url = f"https://api.openweathermap.org/data/2.5/weather?q={city_code}&appid={WEATHER_API_KEY}&units=metric&lang=zh_cn"
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        weather_desc = data['weather'][0]['description']
+        temp = round(data['main']['temp'], 2)
+        return f"{weather_desc}，{temp}°C"
+    except Exception as e:
+        print(f"{country} 天气获取失败:", e)
+        return "天气信息不可用"
+
 def send_to_feishu(news_data):
     lines = []
-    for country, items in news_data.items():
-        country_code = COUNTRY_CODES.get(country, "")
-        weather_info = get_weather(country, country_code)
-        lines.append(f"🌤 {country} 今日天气：{weather_info}\n")
-        for news in items:
-            short_link = shorten_link(news['link'])
-            lines.append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {short_link}")
-        lines.append("\n")
-    
-    text = "\n".join(lines) if lines else "今日暂无相关新闻"
+    if not news_data:
+        text = "今日暂无相关新闻"
+    else:
+        for country, items in news_data.items():
+            weather_info = get_weather(country)
+            lines.append(f"🌤 {country} 今日天气：{weather_info}\n")
+            for news in items:
+                short_link = shorten_link(news['link'])
+                lines.append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {short_link}")
+            lines.append("")  # 空行分隔不同国家
+        text = "\n".join(lines)
+
     payload = {
         "msg_type": "text",
         "content": {"text": f"🌏 今日东南亚跨境电商快讯（{datetime.now().strftime('%Y-%m-%d %H:%M')}）\n\n{text}"}
     }
     try:
-        r = requests.post(FEISHU_WEBHOOK, json=payload, timeout=10)
+        r = requests.post(WEBHOOK_URL, json=payload, timeout=10)
         r.raise_for_status()
         print("飞书发送成功")
     except Exception as e:
