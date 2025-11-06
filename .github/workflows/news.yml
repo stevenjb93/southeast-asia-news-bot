@@ -1,12 +1,12 @@
-name: run-news-bot
+name: Run News Bot
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 每天 UTC 2 点执行
+    - cron: '0 2 * * *'  # UTC 2点每天运行一次
   workflow_dispatch:
 
 jobs:
-  news:
+  run-news-bot:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -15,7 +15,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.14'
+          python-version: '3.13'
 
       - name: Install dependencies
         run: |
@@ -26,5 +26,4 @@ jobs:
         env:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-        run: |
-          python news_bot.py
+        run: python news_bot.py
