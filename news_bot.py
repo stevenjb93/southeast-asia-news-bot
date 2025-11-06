@@ -1,6 +1,7 @@
 import os
 import requests
 import feedparser
+import time
 from datetime import datetime
 
 # 读取环境变量
@@ -28,32 +29,36 @@ def get_latest_news():
             print("RSS抓取失败:", e)
     return news_items
 
-def summarize_with_gpt(news_title):
-    """调用 OpenAI GPT 生成中文摘要（仅用标题）"""
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {"role": "system", "content": "你是一个中文跨境电商新闻编辑，帮我用简洁中文总结新闻，突出对东南亚跨境电商可能的影响。"},
-                    {"role": "user", "content": f"新闻标题：{news_title}\n请用中文写一句简短摘要（15字内），突出经济、政策或天气对电商影响。"}
-                ],
-                "max_tokens": 60,
-            },
-            timeout=15
-        )
-        response.raise_for_status()
-        data = response.json()
-        summary = data["choices"][0]["message"]["content"].strip()
-        return summary
-    except Exception as e:
-        print("GPT摘要生成失败:", e)
-        return "（摘要生成失败）"
+def summarize_with_gpt(news_title, retries=3, delay=2):
+    """调用 OpenAI GPT 生成中文摘要（仅用标题），带重试机制"""
+    for attempt in range(retries):
+        try:
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-3.5-turbo",
+                    "messages": [
+                        {"role": "system", "content": "你是一个中文跨境电商新闻编辑，帮我用简洁中文总结新闻，突出对东南亚跨境电商可能的影响。"},
+                        {"role": "user", "content": f"新闻标题：{news_title}\n请用中文写一句简短摘要（15字内），突出经济、政策或天气对电商影响。"}
+                    ],
+                    "max_tokens": 60,
+                },
+                timeout=15
+            )
+            response.raise_for_status()
+            data = response.json()
+            summary = data["choices"][0]["message"]["content"].strip()
+            return summary
+        except requests.exceptions.RequestException as e:
+            print(f"网络请求失败: {e}, 尝试重试 {attempt+1}/{retries}")
+        except Exception as e:
+            print(f"其他错误: {e}, 尝试重试 {attempt+1}/{retries}")
+        time.sleep(delay)
+    return "（摘要生成失败）"
 
 def send_to_feishu(news_list):
     """发送到飞书"""
