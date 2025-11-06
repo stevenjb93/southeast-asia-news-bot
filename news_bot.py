@@ -5,11 +5,11 @@ import time
 from datetime import datetime
 from googletrans import Translator  # pip install googletrans==4.0.0-rc1
 
-# 环境变量
+# 读取环境变量
 WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# RSS源
+# 新闻RSS源（东南亚跨境电商方向）
 RSS_FEEDS = [
     "https://news.google.com/rss/search?q=southeast+asia+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
     "https://news.google.com/rss/search?q=philippines+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
@@ -18,21 +18,39 @@ RSS_FEEDS = [
     "https://news.google.com/rss/search?q=vietnam+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"
 ]
 
-translator = Translator()
+# 优先级关键词及权重
+PRIORITY_KEYWORDS = {
+    "TikTok": 3,
+    "cross-border": 2,
+    "ecommerce": 2,
+    "Southeast Asia": 1,
+    "policy": 1,
+    "logistics": 1,
+    "weather": 0.5
+}
 
 def get_latest_news():
+    """抓取新闻标题和链接"""
     news_items = []
     for url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:2]:  # 每源取前2条
+            for entry in feed.entries[:2]:  # 每个源取前2条
                 news_items.append({"title": entry.title, "link": entry.link})
         except Exception as e:
             print("RSS抓取失败:", e)
     return news_items
 
+def get_priority_score(title):
+    """根据关键词计算优先级分数"""
+    score = 0
+    for kw, weight in PRIORITY_KEYWORDS.items():
+        if kw.lower() in title.lower():
+            score += weight
+    return score
+
 def summarize_with_gpt(news_title, retries=3, delay=2):
-    """调用 GPT 生成摘要"""
+    """调用 OpenAI GPT 生成中文摘要（仅用标题），带重试机制"""
     for attempt in range(retries):
         try:
             response = requests.post(
@@ -44,8 +62,8 @@ def summarize_with_gpt(news_title, retries=3, delay=2):
                 json={
                     "model": "gpt-3.5-turbo",
                     "messages": [
-                        {"role": "system", "content": "你是中文跨境电商新闻编辑，帮我用简洁中文总结新闻，突出对东南亚跨境电商影响。"},
-                        {"role": "user", "content": f"新闻标题：{news_title}\n请用中文写一句简短摘要（15字内）"}
+                        {"role": "system", "content": "你是一个中文跨境电商新闻编辑，帮我用简洁中文总结新闻，突出对东南亚跨境电商可能的影响。"},
+                        {"role": "user", "content": f"新闻标题：{news_title}\n请用中文写一句简短摘要（15字内），突出经济、政策或天气对电商影响。"}
                     ],
                     "max_tokens": 60,
                 },
@@ -54,34 +72,31 @@ def summarize_with_gpt(news_title, retries=3, delay=2):
             response.raise_for_status()
             data = response.json()
             summary = data["choices"][0]["message"]["content"].strip()
-            if summary:
-                return summary
+            return summary
+        except requests.exceptions.RequestException as e:
+            print(f"网络请求失败: {e}, 尝试重试 {attempt+1}/{retries}")
         except Exception as e:
-            print(f"摘要生成失败: {e}, 重试 {attempt+1}/{retries}")
+            print(f"其他错误: {e}, 尝试重试 {attempt+1}/{retries}")
         time.sleep(delay)
+    return "（摘要生成失败）"
 
-    # GPT失败时用Google翻译标题
+def translate_summary(summary):
+    """将摘要翻译成中文（防止原本英文未翻译）"""
     try:
-        translated = translator.translate(news_title, src='en', dest='zh-cn')
-        return translated.text
+        translator = Translator()
+        return translator.translate(summary, dest="zh-cn").text
     except Exception as e:
         print("翻译失败:", e)
-        return news_title  # 最后兜底用原文
-
-def shorten_link(url):
-    """简单缩短Google RSS链接"""
-    if "articles/" in url:
-        return "https://news.google.com/" + url.split("articles/")[1].split("?")[0]
-    return url
+        return summary
 
 def send_to_feishu(news_list):
+    """发送到飞书"""
     if not news_list:
         text = "今日暂无相关新闻"
     else:
         lines = []
         for news in news_list:
-            short_link = shorten_link(news['link'])
-            lines.append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {short_link}")
+            lines.append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {news['link']}")
         text = "\n\n".join(lines)
 
     payload = {
@@ -98,5 +113,10 @@ def send_to_feishu(news_list):
 if __name__ == "__main__":
     news_data = get_latest_news()
     for item in news_data:
-        item["summary"] = summarize_with_gpt(item["title"])
+        summary = summarize_with_gpt(item["title"])
+        item["summary"] = translate_summary(summary)
+        item["score"] = get_priority_score(item["title"])
+
+    # 按关键词优先级排序
+    news_data.sort(key=lambda x: x["score"], reverse=True)
     send_to_feishu(news_data)
