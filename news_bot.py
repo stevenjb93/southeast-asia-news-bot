@@ -1,7 +1,6 @@
 import os
 import requests
 import feedparser
-from bs4 import BeautifulSoup
 from datetime import datetime
 
 # 读取环境变量
@@ -29,20 +28,8 @@ def get_latest_news():
             print("RSS抓取失败:", e)
     return news_items
 
-def get_article_text(url):
-    """抓取新闻正文（取前500字）"""
-    try:
-        r = requests.get(url, timeout=5)
-        soup = BeautifulSoup(r.text, "html.parser")
-        paragraphs = soup.find_all("p")
-        content = "\n".join([p.get_text() for p in paragraphs])
-        return content[:500]  # 截取前500字节
-    except Exception as e:
-        print(f"抓取正文失败 {url}: {e}")
-        return ""
-
-def summarize_with_gpt(news_title, article_text):
-    """调用 OpenAI GPT 生成中文摘要"""
+def summarize_with_gpt(news_title):
+    """调用 OpenAI GPT 生成中文摘要（仅用标题）"""
     try:
         response = requests.post(
             "https://api.openai.com/v1/chat/completions",
@@ -54,7 +41,7 @@ def summarize_with_gpt(news_title, article_text):
                 "model": "gpt-4o-mini",
                 "messages": [
                     {"role": "system", "content": "你是一个中文跨境电商新闻编辑，帮我用简洁中文总结新闻，突出对东南亚跨境电商可能的影响。"},
-                    {"role": "user", "content": f"新闻标题：{news_title}\n内容：{article_text}\n请用中文写一句简短摘要（15字内），突出经济、政策或天气对电商影响。"}
+                    {"role": "user", "content": f"新闻标题：{news_title}\n请用中文写一句简短摘要（15字内），突出经济、政策或天气对电商影响。"}
                 ],
                 "max_tokens": 60,
             },
@@ -92,7 +79,5 @@ def send_to_feishu(news_list):
 if __name__ == "__main__":
     news_data = get_latest_news()
     for item in news_data:
-        content = get_article_text(item["link"])
-        item["summary"] = summarize_with_gpt(item["title"], content)
+        item["summary"] = summarize_with_gpt(item["title"])
     send_to_feishu(news_data)
-
