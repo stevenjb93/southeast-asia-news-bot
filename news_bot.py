@@ -8,31 +8,28 @@ from googletrans import Translator  # pip install googletrans==4.0.0-rc1
 # 环境变量
 WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
 # RSS源
 RSS_FEEDS = [
-    ("东南亚", "https://news.google.com/rss/search?q=southeast+asia+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"),
-    ("菲律宾", "https://news.google.com/rss/search?q=philippines+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"),
-    ("泰国", "https://news.google.com/rss/search?q=thailand+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"),
-    ("马来西亚", "https://news.google.com/rss/search?q=malaysia+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"),
-    ("越南", "https://news.google.com/rss/search?q=vietnam+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en")
+    "https://news.google.com/rss/search?q=southeast+asia+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
+    "https://news.google.com/rss/search?q=philippines+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
+    "https://news.google.com/rss/search?q=thailand+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
+    "https://news.google.com/rss/search?q=malaysia+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en",
+    "https://news.google.com/rss/search?q=vietnam+ecommerce+OR+cross-border+OR+logistics+OR+policy+OR+weather&hl=en&gl=SG&ceid=SG:en"
 ]
 
 translator = Translator()
 
 def get_latest_news():
     news_items = []
-    for region_name, url in RSS_FEEDS:
+    for url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:2]:  # 每源取前2条
-                news_items.append({
-                    "title": entry.title,
-                    "link": entry.link,
-                    "region": region_name
-                })
+                news_items.append({"title": entry.title, "link": entry.link})
         except Exception as e:
-            print(f"RSS抓取失败 ({region_name}):", e)
+            print("RSS抓取失败:", e)
     return news_items
 
 def summarize_with_gpt(news_title, retries=3, delay=2):
@@ -78,23 +75,47 @@ def shorten_link(url):
         return "https://news.google.com/" + url.split("articles/")[1].split("?")[0]
     return url
 
-def send_to_feishu(news_list):
-    if not news_list:
-        text = "今日暂无相关新闻"
-    else:
-        # 按地区分类
-        region_dict = {}
-        for news in news_list:
-            region = news['region']
-            if region not in region_dict:
-                region_dict[region] = []
+def get_weather(city_name, country_code=""):
+    """获取指定城市的天气情况"""
+    if not OPENWEATHER_API_KEY:
+        return "天气信息不可用"
+    try:
+        q = f"{city_name},{country_code}" if country_code else city_name
+        url = f"http://api.openweathermap.org/data/2.5/weather?q={q}&appid={OPENWEATHER_API_KEY}&units=metric&lang=zh_cn"
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        temp = data["main"]["temp"]
+        desc = data["weather"][0]["description"]
+        return f"{desc}, {temp}°C"
+    except Exception as e:
+        print(f"天气获取失败 ({city_name}):", e)
+        return "天气信息不可用"
+
+def send_to_feishu(news_by_region):
+    lines = []
+    for region, items in news_by_region.items():
+        # 获取天气
+        if region == "Thailand":
+            weather = get_weather("Bangkok", "TH")
+        elif region == "Malaysia":
+            weather = get_weather("Kuala Lumpur", "MY")
+        elif region == "Vietnam":
+            weather = get_weather("Hanoi", "VN")
+        elif region == "Philippines":
+            weather = get_weather("Manila", "PH")
+        else:
+            weather = "天气信息不可用"
+
+        lines.append(f"🌤 {region} 今日天气：{weather}\n")
+
+        for news in items:
             short_link = shorten_link(news['link'])
-            region_dict[region].append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {short_link}")
-        
-        lines = []
-        for region, items in region_dict.items():
-            lines.append(f"📍 {region}：\n" + "\n\n".join(items))
-        text = "\n\n".join(lines)
+            lines.append(f"📰 {news['title']}\n💬 {news['summary']}\n🔗 {short_link}")
+
+        lines.append("\n")  # 各地区分隔
+
+    text = "\n".join(lines) if lines else "今日暂无相关新闻"
 
     payload = {
         "msg_type": "text",
@@ -111,4 +132,27 @@ if __name__ == "__main__":
     news_data = get_latest_news()
     for item in news_data:
         item["summary"] = summarize_with_gpt(item["title"])
-    send_to_feishu(news_data)
+
+    # 按地区整理
+    news_by_region = {
+        "Thailand": [],
+        "Malaysia": [],
+        "Vietnam": [],
+        "Philippines": [],
+        "Singapore": []
+    }
+
+    for item in news_data:
+        title_lower = item["title"].lower()
+        if "thailand" in title_lower:
+            news_by_region["Thailand"].append(item)
+        elif "malaysia" in title_lower:
+            news_by_region["Malaysia"].append(item)
+        elif "vietnam" in title_lower:
+            news_by_region["Vietnam"].append(item)
+        elif "philippines" in title_lower:
+            news_by_region["Philippines"].append(item)
+        else:
+            news_by_region["Singapore"].append(item)
+
+    send_to_feishu(news_by_region)
