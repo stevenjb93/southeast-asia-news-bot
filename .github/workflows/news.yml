@@ -2,30 +2,30 @@ name: run-news-bot
 
 on:
   schedule:
-    # 每天 2:00 UTC 运行
+    # 每天 2:00 UTC 运行（北京时间 10:00）
     - cron: '0 2 * * *'
   workflow_dispatch:
 
 jobs:
-  build:
+  run:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - name: 检出仓库
+        uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: 设置 Python 环境
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12'  # 改成 3.12，解决 cgi 模块问题
+          python-version: '3.12'  # ✅ 推荐使用 3.12，兼容性最好
 
-      - name: Install dependencies
+      - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
           pip install requests feedparser googletrans==4.0.0-rc1
 
-      - name: Run news bot
+      - name: 运行新闻机器人
         env:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
         run: python news_bot.py
