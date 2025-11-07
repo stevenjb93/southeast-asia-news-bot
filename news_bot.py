@@ -37,7 +37,8 @@ priority_keywords = ["Typhoon", "Storm", "Flood", "台风", "暴雨", "Shopee", 
 def get_weather(city):
     try:
         url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={OWM_API_KEY}&units=metric&lang=zh_cn"
-        response = requests.get(url)
+        response = requests.post(FEISHU_WEBHOOK, json=data)
+print("Feishu response:", response.status_code, response.text)
         response.raise_for_status()
         data = response.json()
         desc = data["weather"][0]["description"]
